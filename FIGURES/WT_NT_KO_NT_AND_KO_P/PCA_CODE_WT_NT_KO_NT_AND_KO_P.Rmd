@@ -1,0 +1,185 @@
+---
+title: "PCA_CODE_WT_NT_KO_NT_AND_KO_P"
+author: "David Martínez-Delgado"
+date: "2025-07-31"
+output: html_document
+---
+```
+```{r}
+
+#######################################################
+# 0. Libraries (install svglite if you don't have it) #
+#######################################################
+
+library(dplyr)
+
+library(ggplot2)
+
+library(ggrepel)
+
+library(svglite)
+
+###################################
+# 1. Read Expression Matrix (VST) #
+###################################
+
+expr_mat <- read.delim(
+  "WT_NT_KO_NT_AND_KO_P_VST_TRANSFORMED.txt",
+  header = TRUE,
+  sep    = "\t",
+  stringsAsFactors = FALSE,
+  check.names      = FALSE
+)
+
+# Case A: the table does have the 'external_gene_name' column:
+
+if ("external_gene_name" %in% colnames(expr_mat)) {
+  rownames(expr_mat) <- expr_mat$external_gene_name
+  expr_mat <- expr_mat[, !(colnames(expr_mat) == "external_gene_name")]
+
+# Case B: does not have gene header (1st col):
+
+} else {
+  rownames(expr_mat) <- expr_mat[[1]]
+  expr_mat <- expr_mat[, -1]
+}
+
+################################################
+# 2. Read metadata and keep WT_NT, KO_NT, KO_P #
+################################################
+
+metadata <- read.csv("Metadata.csv", stringsAsFactors = FALSE)
+
+rownames(metadata) <- metadata$Samples
+
+metadata$Samples    <- NULL
+
+metadata_use <- metadata |>
+  filter(Group %in% c("WT_NT", "KO_NT", "KO_P")) |>
+  select(Group)                |>
+  `names<-`("Condition")
+
+metadata_use$Sample <- rownames(metadata_use)
+
+# Rename conditions (legend):
+
+metadata_use$Condition[metadata_use$Condition == "WT_NT"] <- "WT"
+
+metadata_use$Condition[metadata_use$Condition == "KO_NT"] <- "KO"
+
+metadata_use$Condition[metadata_use$Condition == "KO_P"]  <- "KO + Propranolol"
+
+# Desired order in the legend:
+
+metadata_use$Condition <- factor(
+  metadata_use$Condition,
+  levels = c("WT", "KO", "KO + Propranolol")
+)
+
+################################
+# 3. Align matrix and metadata #
+################################
+
+expr_mat <- expr_mat[, metadata_use$Sample]
+
+#################
+# 4. Create PCA #
+#################
+
+pca_res <- prcomp(t(expr_mat), center = TRUE, scale. = TRUE)
+
+pca_df <- data.frame(pca_res$x[, 1:2],
+                     Sample = rownames(pca_res$x)) |>
+          merge(metadata_use, by = "Sample")
+
+var_pct <- summary(pca_res)$importance["Proportion of Variance", 1:2] * 100
+
+pc1_pct <- round(var_pct[1], 1)
+
+pc2_pct <- round(var_pct[2], 1)
+
+##############################
+# 5. Palette and 'base_plot' #
+##############################
+
+palette_cb <- c("WT"                = "#B0B0B0",  # Light gray.
+                "KO"                = "#0072B2",  # Blue.
+                "KO + Propranolol"  = "#E69F00")  # Orange.
+
+base_plot <- ggplot(pca_df, aes(PC1, PC2, fill = Condition)) +
+  scale_fill_manual(values = palette_cb)
+
+########################
+# 6. Common aesthetics #
+########################
+
+lim_fixed <- 20
+
+break_seq <- seq(-lim_fixed, lim_fixed, by = 5)
+
+common_aesthetics <- list(
+  theme(
+    panel.border     = element_rect(colour = "black", fill = NA, size = 1.2),
+    panel.grid.major = element_line(colour = "grey85", size = 0.4),
+    panel.grid.minor = element_blank(),
+    axis.title.x     = element_text(margin = margin(t = 12),
+                                    family = "Arial", size = 12),
+    axis.title.y     = element_text(margin = margin(r = 12),
+                                    family = "Arial", size = 12),
+    legend.title     = element_text(family = "Arial", size = 14, face = "bold"),
+    legend.text      = element_text(family = "Arial", size = 12),
+    legend.key.size  = unit(1, "cm")
+  ),
+  geom_hline(yintercept = 0, colour = "#A0A0A0", size = 1),
+  geom_vline(xintercept = 0, colour = "#A0A0A0", size = 1),
+  scale_x_continuous(limits = c(-lim_fixed, lim_fixed), breaks = break_seq),
+  scale_y_continuous(limits = c(-lim_fixed, lim_fixed), breaks = break_seq),
+  coord_fixed()
+)
+
+#####################
+# 7. Create Figures #
+#####################
+
+fig_plain <- base_plot +
+  geom_point(shape = 21, size = 3, colour = "black", stroke = 0.8) +
+  labs(x = paste0("PC1 (", pc1_pct, "%)"),
+       y = paste0("PC2 (", pc2_pct, "%)")) +
+  theme_minimal(base_family = "Arial") +
+  common_aesthetics
+
+fig_labels <- fig_plain +
+  geom_text_repel(aes(label = Sample), size = 3, family = "Arial",
+                  max.overlaps = Inf, seed = 123)
+
+###################
+# 7. Save Figures #
+###################
+
+# Save png:
+
+ggsave("PCA_DEG_FROM_FDR_0_05_FC_1_5_WT_NT_VS_KO_NT_IN_WT_NT_AND_KO_NT_AND_KO_P_PROPRANOLOL_VST.png",
+       plot   = fig_plain,
+       dpi    = 1200,
+       width  = 8, height = 8, units = "in")
+
+ggsave("PCA_DEG_FROM_FDR_0_05_FC_1_5_WT_NT_VS_KO_NT_IN_WT_NT_AND_KO_NT_AND_KO_P_PROPRANOLOL_VST_WITH_LABELS.png",
+       plot   = fig_labels,
+       dpi    = 1200,
+       width  = 8, height = 8, units = "in")
+
+# Save svg:
+
+ggsave("PCA_DEG_FROM_FDR_0_05_FC_1_5_WT_NT_VS_KO_NT_IN_WT_NT_AND_KO_NT_AND_KO_P_PROPRANOLOL_VST.svg",
+       plot   = fig_plain,
+       device = "svg",
+       width  = 8, height = 8, units = "in")
+
+ggsave("PCA_DEG_FROM_FDR_0_05_FC_1_5_WT_NT_VS_KO_NT_IN_WT_NT_AND_KO_NT_AND_KO_P_PROPRANOLOL_VST_WITH_LABELS.svg",
+       plot   = fig_labels,
+       device = "svg",
+       width  = 8, height = 8, units = "in")
+
+```
+
+
