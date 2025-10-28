@@ -1,0 +1,157 @@
+---
+title: "KO_NT_vs_KO_P_CONTROL_VS_TREATMENT"
+author: "David Martinez-Delgado"
+date: "12/05/2023"
+output:
+  pdf_document: default
+  html_document: default
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+**Data preparation**
+First, we need to indicate in which directory htseq-count files are located:
+```{r}
+#Directory:
+Root_directory <- getwd()
+htseq_folder <- "htseq"
+dir <- paste(Root_directory,htseq_folder, sep="/", collapse=NULL)
+
+# Activate library:
+library(readr)
+samples <- read_delim("samples.txt", "\t", escape_double = FALSE, trim_ws = TRUE)
+
+#Showing records from samples file:
+head(samples, 12) 
+
+```
+**Importing data matrix and Differential Expression analysis**
+#Import data matrix using "DESeqDataSetFromHTSeqCount"
+```{r}
+# Loading DESeq2 package:
+library(DESeq2) 
+
+# Design sampleTable (Note that an extra "batch" column is necessary for batch correction):
+files <- grep("htseq",list.files(dir),value=TRUE)
+
+sampleTable <- data.frame(sampleName = samples$ID,
+                          fileName = files,
+                          condition = samples$condition)
+
+#sampleTable$batch<-samples$batch
+
+# Create a DESeq2 object with DESeqDataSetFromTximport function:
+ddsHTSeq <- DESeqDataSetFromHTSeqCount(sampleTable = sampleTable,
+                                       directory = dir,
+                                       design= ~ condition)
+
+# Setting comparison order for DESeq2. If not configured, will be set in alphabetical order. Relevel allow us to specificate the reference level.
+ddsHTSeq$condition <- relevel(ddsHTSeq$condition, ref = "KO_NT")
+
+# Change name to ddsHTSeq object.
+dds <-ddsHTSeq
+
+# Pre-filtering (Removing rows in which we have less than 1 read in all samples combined):
+#dds <- dds[rowSums(DESeq2::counts(dds)) >= 1] 
+keep <- rowSums(counts(dds)) >= 1
+dds <- dds[keep,]
+
+# Run differential analysis with DESeq2:
+dds<-DESeq(dds) 
+
+# Check comparisons name in order to select the ones that you will extract:
+resultsNames(dds)
+
+# Fold change shrinkage:
+library(apeglm)
+condition_KO_P_vs_KO_NT <- lfcShrink(dds, coef="condition_KO_P_vs_KO_NT", type="apeglm")
+
+# Obtain normalized read counts:
+normalized_counts <- counts(dds, normalized=TRUE)
+
+# vst transformation:
+vsd <-vst(dds, blind = FALSE)
+
+# limma batch correction:
+#mat <- assay(vsd)
+#mm <- model.matrix(~condition, colData(vsd))
+#mat <- limma::removeBatchEffect(mat, batch=vsd$batch, design=mm)
+#assay(vsd) <- mat
+
+# Create plots:
+library(ggplot2)
+plotPCA(vsd)
+plotPCA(vsd) + geom_text(aes(label=name),vjust=2,size=2)
+```
+**Annotate Ensembl genes** 
+```{r}
+# Annotate Ensembl annotation:
+library(biomaRt)
+library(tidyverse)
+
+# View the available databases:
+listMarts()
+
+## Set up connection to ensembl database:
+ensembl=useMart("ENSEMBL_MART_ENSEMBL")
+
+# List the available datasets (species):
+listDatasets(ensembl) %>% 
+    filter(str_detect(description, "Mouse"))
+
+# Specify a data set to use:
+ensembl = useDataset("mmusculus_gene_ensembl", mart=ensembl)
+
+#Now we need to set up a query. For this we need to specify three things:
+#What type of information we are going to search the data set on - called filters. In our case this is **Ensembl Gene IDs**
+#A vector of the values for our filter - the Ensembl Gene IDs from our DE results table
+#What columns (attributes) of the data set we want returned.
+
+# Check the available "filters" - things you can filter for:
+listFilters(ensembl) %>% 
+    filter(str_detect(name, "ensembl"))
+
+# Set the filter type and values:
+filterType <- "ensembl_gene_id"
+filterValues <- rownames(condition_KO_P_vs_KO_NT)
+
+# Check the available "attributes" - things you can retrieve:
+listAttributes(ensembl) %>% 
+    head(40)
+
+# Set the list of attributes:
+attributeNames <- c('ensembl_gene_id', 'external_gene_name', 'chromosome_name', 'start_position', 'end_position', 'strand', 'gene_biotype')
+
+# Run the query:
+annot <- getBM(attributes=attributeNames, 
+               filters = filterType, 
+               values = filterValues, 
+               mart = ensembl)
+head(annot)
+
+# Rename columns in data frame:
+colnames(annot)
+colnames(condition_KO_P_vs_KO_NT)
+
+annot_final <- as.data.frame(condition_KO_P_vs_KO_NT) %>% 
+    rownames_to_column("ensembl_gene_id") %>% 
+    left_join(annot, "ensembl_gene_id") %>% 
+    rename(logFC=log2FoldChange, FDR=padj)
+
+annot_norm_reads <- as.data.frame(normalized_counts) %>% 
+    rownames_to_column("ensembl_gene_id") %>% 
+    left_join(annot, "ensembl_gene_id")
+
+tmp <- assay(vsd)
+
+annot_vsd <- as.data.frame(tmp) %>%
+    rownames_to_column("ensembl_gene_id") %>% 
+    left_join(annot, "ensembl_gene_id")
+
+# Write tables:
+write.table(annot_final,file = "condition_KO_P_vs_KO_NT.xls", sep = "\t")
+write.table(annot_norm_reads,file = "normalized_counts.xls", sep = "\t")
+write.table(annot_vsd,file = "log2_vsd_normalized_reads.xls", sep = "\t")
+```
