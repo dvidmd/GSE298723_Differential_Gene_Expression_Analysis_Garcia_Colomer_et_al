@@ -1,8 +1,0 @@
-ID	run	condition	strand
-E15_KO_NT	E15_KO_NT_htseq	KO_NT	Unstranded
-E15_WT_NT	E15_WT_NT_htseq	WT_NT	Unstranded
-E29_KO_NT	E29_KO_NT_htseq	KO_NT	Unstranded
-E29_WT_NT	E29_WT_NT_htseq	WT_NT	Unstranded
-E31_KO_NT	E31_KO_NT_htseq	KO_NT	Unstranded
-E31_WT_NT	E31_WT_NT_htseq	WT_NT	Unstranded
-
